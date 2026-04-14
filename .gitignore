@@ -1,0 +1,14 @@
+# Terraform local state and plugins
+.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+*.tfvars.json
+
+# Kubernetes / Helm
+.kube/
+*.log
+
+# OS generated files
+.DS_Store
