@@ -1,14 +1,5 @@
-# Terraform local state and plugins
-.terraform/*
+.terraform/
 *.tfstate
-*.tfstate.*
-crash.log
-*.tfvars
-*.tfvars.json
-
-# Kubernetes / Helm
-.kube/
-*.log
-
-# OS generated files
+*.tfstate.backup
+.terraform.lock.hcl
 .DS_Store
