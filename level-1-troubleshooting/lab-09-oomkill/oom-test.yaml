@@ -10,6 +10,6 @@ spec:
     args: ["--vm", "1", "--vm-bytes", "20M", "--vm-hang", "1"] 
     resources:
       limits:
-        memory: "10Mi"  # The limit (ceiling)
+        memory: "30Mi"  # Increased from 10Mi to 30Mi (now it can handle the 20Mi stress)
       requests:
-        memory: "5Mi"   # The request (guarantee)
+        memory: "20Mi"  # Increased from 5Mi to 20Mi to guarantee the space

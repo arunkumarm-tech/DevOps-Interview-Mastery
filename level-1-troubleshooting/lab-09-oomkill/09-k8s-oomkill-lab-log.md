@@ -11,3 +11,15 @@ Created a pod manifest (`oom-test.yaml`) using a stress-testing image:
 **Command used to deploy:**
 ```bash
 kubectl apply -f oom-test.yaml
+
+
+## 3. The Resolution (The Fix)
+**Action:** Identified that the application required more memory than the allocated 10Mi limit. Updated the deployment manifest to increase the limits.
+
+**Modified YAML configuration:**
+```yaml
+    resources:
+      limits:
+        memory: "30Mi"  # Increased to provide breathing room
+      requests:
+        memory: "20Mi"
