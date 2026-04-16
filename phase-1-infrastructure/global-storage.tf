@@ -1,4 +1,4 @@
-# 1. IAM Role so S3 can replicate data
+# 1. IAM Role: The "Identity" for S3 to use
 resource "aws_iam_role" "replication" {
   name = "s3-replication-role-arun"
 
@@ -16,9 +16,41 @@ resource "aws_iam_role" "replication" {
 POLICY
 }
 
-# (Note: You would also attach a policy to this role giving it S3 permissions)
+# 2. IAM Policy: The "Permissions" (Read from US, Write to EU)
+resource "aws_iam_policy" "replication" {
+  name = "s3-replication-policy-arun"
 
-# 2. Source Bucket (US)
+  policy = <<POLICY
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": ["s3:GetReplicationConfiguration", "s3:ListBucket"],
+      "Effect": "Allow",
+      "Resource": ["arn:aws:s3:::arun-data-master-us-082645"]
+    },
+    {
+      "Action": ["s3:GetObjectVersionForReplication", "s3:GetObjectVersionAcl"],
+      "Effect": "Allow",
+      "Resource": ["arn:aws:s3:::arun-data-master-us-082645/*"]
+    },
+    {
+      "Action": ["s3:ReplicateObject", "s3:ReplicateDelete"],
+      "Effect": "Allow",
+      "Resource": ["arn:aws:s3:::arun-data-backup-eu-082645/*"]
+    }
+  ]
+}
+POLICY
+}
+
+# 3. Attach Policy to Role
+resource "aws_iam_role_policy_attachment" "replication" {
+  role       = aws_iam_role.replication.name
+  policy_arn = aws_iam_policy.replication.arn
+}
+
+# 4. Source Bucket (US)
 resource "aws_s3_bucket" "source" {
   bucket = "arun-data-master-us-082645"
 }
@@ -28,7 +60,7 @@ resource "aws_s3_bucket_versioning" "source_v" {
   versioning_configuration { status = "Enabled" }
 }
 
-# 3. Destination Bucket (Ireland)
+# 5. Destination Bucket (Ireland)
 resource "aws_s3_bucket" "destination" {
   provider = aws.ireland
   bucket   = "arun-data-backup-eu-082645"
@@ -40,8 +72,10 @@ resource "aws_s3_bucket_versioning" "dest_v" {
   versioning_configuration { status = "Enabled" }
 }
 
-# 4. The Replication Rule (The actual 'Sync' Engine)
+# 6. Replication Rule (The Sync Engine)
 resource "aws_s3_bucket_replication_configuration" "replication" {
+  depends_on = [aws_s3_bucket_versioning.source_v, aws_s3_bucket_versioning.dest_v]
+
   role   = aws_iam_role.replication.arn
   bucket = aws_s3_bucket.source.id
 
