@@ -162,3 +162,63 @@ JSONENCODE: A modern Terraform function used to format IAM policies clearly with
 
 dquote>: A terminal prompt indicating an unclosed quote; resolved by using Ctrl+C and running commands line-by-line.
 
+------------------------------------------------------------------
+
+⚠️ 3. Terminal Fixes & Troubleshooting History
+Issue: The Terminal dquote> Loop
+
+Status: Resolved.
+
+Fix: Pressed Control + C to break the terminal's wait for a missing/smart quote and reset the prompt.
+
+Issue: Duplicate Provider Error
+
+Status: Resolved.
+
+Fix: Moved all regional provider blocks into a central providers.tf and deleted redundant blocks in multi-region.tf and global-storage.tf.
+
+Issue: Versioning Race Condition
+
+Status: Resolved.
+
+Fix: Added an explicit depends_on block to the replication resource to force Terraform to wait for the AWS API to finish enabling versioning.
+
+Issue: Missing Sync Permissions
+
+Status: Resolved.
+
+Fix: Created an aws_iam_role_policy_attachment to give the replication role the "hands" needed to move data between buckets.
+
+💻 4. Complete Terminal Command Log
+These are the exact commands executed on the MacBook Air to complete this scenario:
+
+Bash
+# Infrastructure Deployment
+terraform init
+terraform plan
+terraform apply -auto-approve
+
+# Data Sync Validation (Run one by one)
+echo "Arun Global Data Test" > validation.txt
+aws s3 cp validation.txt s3://arun-data-master-us-082645/
+
+# Monitoring (List buckets and check replication)
+aws s3 ls
+aws s3 ls s3://arun-data-master-us-082645/
+aws s3 ls s3://arun-data-backup-eu-082645/
+
+# Git Portfolio Management
+git add providers.tf global-storage.tf SCENARIO-5-GLOBAL-STORAGE.md
+git commit -m "feat: finalized and validated multi-region S3 replication"
+git push origin main
+💡 5. Master Command Glossary
+JSONENCODE: Modern Terraform function for writing clean IAM policies.
+
+Asynchronous Replication: Background data copying (not instant, but durable).
+
+depends_on: Solves race conditions by forcing the execution order of resources.
+
+cat [filename]: Used to verify the content of a local test file before uploading.
+
+🚀 6. Final Deployment
+Successfully pushed to GitHub. All resources verified in the AWS Console across US-East-1 and EU-West-1.
