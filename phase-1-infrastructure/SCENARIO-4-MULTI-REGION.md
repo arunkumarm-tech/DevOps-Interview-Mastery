@@ -50,19 +50,17 @@ terraform plan
 # Apply the global changes
 terraform apply -auto-approve
 🧪 3. Validation and Testing (Proof of Concept)
-Once Terraform finishes, you must verify the resources exist in the actual AWS regions using the CLI.
+Method 1: Validation via CLI (Terminal)
+Verify US Topic: aws sns list-topics --region us-east-1
 
-Step 1: Verify the US Topic
+Verify Europe Topic: aws sns list-topics --region eu-west-1
 
-Bash
-aws sns list-topics --region us-east-1
-Expected: You should see global-alerts-us in the list.
+Method 2: Validation via AWS Console (Web UI)
+Log in to the AWS Console and search for Simple Notification Service (SNS).
 
-Step 2: Verify the Europe Topic
+In the top right corner, set the region to US East (N. Virginia). Click Topics to find global-alerts-us.
 
-Bash
-aws sns list-topics --region eu-west-1
-Expected: You should see global-alerts-eu in the list.
+Change the region in the top right corner to Europe (Ireland). Click Topics to find global-alerts-eu.
 
 💡 4. Master Command Glossary
 alias : The Terraform keyword used to define multiple providers.
