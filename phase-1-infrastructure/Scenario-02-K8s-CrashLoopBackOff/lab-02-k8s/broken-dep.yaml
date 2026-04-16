@@ -1,0 +1,18 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: faulty-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: faulty-app
+  template:
+    metadata:
+      labels:
+        app: faulty-app
+    spec:
+      containers:
+      - name: failing-container
+        image: busybox
+        command: ["sh", "-c", "echo 'Starting...'; sleep 3600"]
