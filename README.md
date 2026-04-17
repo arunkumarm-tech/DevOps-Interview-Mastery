@@ -1,24 +1,16 @@
-# DevOps-Interview-Mastery
-Practical scenarios and implementation for AWS, Kubernetes, Terraform, and CI/CD.
-# DevOps Technical Interview Roadmap
+# DevOps Interview Mastery: 100 Scenarios
 
-This repository contains my practical preparation for Senior DevOps, SRE, and Platform Engineering roles. It is organized into a hierarchy of technical expertise, moving from day-to-day troubleshooting to high-level architecture.
+This repository documents my journey through 100 real-world DevOps scenarios across 10 phases. 
+Each scenario includes a professional interviewer response and the technical implementation.
 
-## 📈 Preparation Roadmap
-
-### Level 1: The Firefighter (Troubleshooting)
-*Focused on immediate production remediation and incident response.*
-- [ ] Kubernetes CrashLoopBackOff & Resource Limits
-- [ ] Terraform State Drift & Lock Remediation
-- [ ] CI/CD Rollback Strategies
-
-### Level 2: The Builder (IaC & Networking)
-*Focused on stable infrastructure and scalable networking.*
-- [ ] Multi-region Terraform Deployment
-- [ ] EKS Networking (Ingress vs LoadBalancer)
-- [ ] AWS Transit Gateway Configuration
-
-### Level 3: The Guardian (Security & Compliance)
-- [ ] IAM Permission Boundaries & SCPs
-- [ ] Secret Management (AWS Secrets Manager)
-- [ ] Container Security Scanning (Trivy/Snyk)
+## Phase 1: Infrastructure as Code & Cloud Foundations
+1. [Scenario 01: Terraform State Drift](./phase-1-infrastructure/Scenario-01-Terraform-State-Drift)
+2. [Scenario 02: K8s CrashLoopBackOff](./phase-1-infrastructure/Scenario-02-K8s-CrashLoopBackOff)
+3. [Scenario 03: CI/CD Pipeline Security](./phase-1-infrastructure/Scenario-03-CI-CD-Pipeline-Security)
+4. [Scenario 04: Multi-Region Infrastructure](./phase-1-infrastructure/Scenario-04-Multi-Region-Infra)
+5. [Scenario 05: Docker Image Optimization](./phase-1-infrastructure/Scenario-05-Docker-Optimization)
+6. [Scenario 06: Global VPC Peering](./phase-1-infrastructure/Scenario-06-HA-EKS-Architecture)
+7. [Scenario 07: Blue/Green Deployment](./phase-1-infrastructure/Scenario-07-Blue-Green-Route53)
+8. [Scenario 08: Terraform State Locking](./phase-1-infrastructure/Scenario-08-Terraform-State-Locking)
+9. [Scenario 09: Kubernetes Resource Limits](./phase-1-infrastructure/Scenario-09-K8s-Resource-Limits)
+10. [Scenario 10: AWS IAM for DevOps](./phase-1-infrastructure/Scenario-10-AWS-IAM-for-DevOps)
