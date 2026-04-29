@@ -1,0 +1,1064 @@
+Scenario 03: CI/CD Pipeline Security
+The Challenge
+You need to securely manage sensitive data, such as database passwords or third-party API keys, within a CI/CD pipeline (like Jenkins or GitLab). Hardcoding these secrets in the source code or printing them in build logs is a massive security risk.
+
+The Architectural Solution
+Secret Managers: Store the sensitive data in a centralized, encrypted vault like AWS Secrets Manager or HashiCorp Vault.
+
+IAM Roles (Not Access Keys): Instead of giving the CI/CD pipeline long-lived AWS Access Keys, use an IAM Role. If Jenkins is on an EC2 instance, use an Instance Profile. If using GitHub/GitLab, use OIDC (OpenID Connect) to assume a temporary IAM role.
+
+Secret Masking: Ensure the CI/CD tool is configured to mask or hide any output that matches a known secret.
+
+Phase 1: Infrastructure Setup (Terraform)
+Objective
+Provision an AWS Secrets Manager secret and create an IAM Role that grants read-only access to that specific secret. We will simulate a scenario where an EC2-based Jenkins server needs to read a database password.
+
+Step 1: Directory Setup
+Bash
+mkdir Scenario-03-CICD-Security
+cd Scenario-03-CICD-Security
+touch main.tf
+Step 2: Define Infrastructure (Terraform)
+Secrets Manager Setup:
+
+Define the secret container.
+
+Define the actual sensitive payload (e.g., a dummy database password).
+
+IAM Configuration:
+
+Create an IAM Policy that allows the secretsmanager:GetSecretValue action, restricted only to the specific secret.
+
+Create an IAM Role for the Jenkins EC2 instance and attach the policy.
+
+Create an IAM Instance Profile to attach the role to the server.
+
+Terraform
+# main.tf
+
+provider "aws" {
+  region = "us-east-1"
+}
+
+# 1. Create the Secret in AWS Secrets Manager
+resource "aws_secretsmanager_secret" "db_password" {
+  name        = "prod/app/db_password"
+  description = "Production database password for the application"
+}
+
+# 2. Store the actual secret value (In a real scenario, use variables or tfvars)
+resource "aws_secretsmanager_secret_version" "db_password_value" {
+  secret_id     = aws_secretsmanager_secret.db_password.id
+  secret_string = jsonencode({
+    username = "admin"
+    password = "SuperSecretPassword123!"
+  })
+}
+
+# 3. Create an IAM Policy allowing read access to this specific secret
+resource "aws_iam_policy" "secret_read_policy" {
+  name        = "JenkinsSecretReadPolicy"
+  description = "Allows Jenkins to read the prod DB password"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "secretsmanager:GetSecretValue"
+        Resource = aws_secretsmanager_secret.db_password.arn
+      }
+    ]
+  })
+}
+
+# 4. Create an IAM Role for the Jenkins EC2 Server
+resource "aws_iam_role" "jenkins_role" {
+  name = "jenkins_ec2_role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# 5. Attach the Policy to the Role
+resource "aws_iam_role_policy_attachment" "jenkins_secret_attach" {
+  role       = aws_iam_role.jenkins_role.name
+  policy_arn = aws_iam_policy.secret_read_policy.arn
+}
+
+# 6. Create the Instance Profile to attach to the EC2 instance
+resource "aws_iam_instance_profile" "jenkins_profile" {
+  name = "jenkins_instance_profile"
+  role = aws_iam_role.jenkins_role.name
+}
+Step 3: Execution Commands
+Bash
+# Initialize Terraform
+terraform init
+
+# Review the plan
+terraform plan
+
+# Provision the security resources
+terraform apply -auto-approve
+Phase 2: CI/CD Pipeline Implementation (Concept)
+If you were writing the Jenkinsfile for this scenario, you would securely fetch the secret using the AWS CLI, utilizing the permissions granted by the Instance Profile we just created.
+
+Groovy
+pipeline {
+    agent any
+    stages {
+        stage('Fetch Secrets') {
+            steps {
+                script {
+                    // The EC2 instance automatically uses its IAM Role to authenticate
+                    def secretJson = sh(script: "aws secretsmanager get-secret-value --secret-id prod/app/db_password --query SecretString --output text", returnStdout: true).trim()
+
+                    // Parse the JSON (Requires Jenkins Pipeline Utility Steps plugin)
+                    def secretProps = readJSON text: secretJson
+                    env.DB_USER = secretProps.username
+                    env.DB_PASS = secretProps.password
+                }
+            }
+        }
+        stage('Deploy') {
+            steps {
+                // Example of using the secret securely
+                sh "echo Deploying with DB User: ${env.DB_USER}"
+                // Note: The password should never be echoed!
+            }
+        }
+    }
+}
+
+
+
+
+
+Awesome. Now that the AWS infrastructure (the Secret, the IAM Role, and the Instance Profile) is successfully deployed, we move to Phase 2, where we actually use the code.
+
+Here is the step-by-step guide on exactly where to put that Jenkins code to prove the pipeline can securely fetch the database password without hardcoding it.
+
+Phase 2: CI/CD Pipeline Implementation
+Step 1: Attach the IAM Role to your Jenkins EC2 Instance
+For Jenkins to securely fetch the secret without AWS Access Keys, the server itself needs the permission we just created.
+
+Log in to the AWS Console and go to EC2.
+
+Select the EC2 instance where your Jenkins server is currently running.
+
+Click Actions -> Security -> Modify IAM role.
+
+Select the jenkins_instance_profile (created in Phase 1) from the dropdown and click Update IAM role.
+
+Step 2: Create the Pipeline Job in Jenkins
+Open your Jenkins UI in your web browser.
+
+From the main dashboard, click New Item on the left menu.
+
+Enter a name (e.g., Scenario-03-Security-Test).
+
+Select Pipeline and click OK.
+
+Step 3: Paste the Jenkinsfile Code
+You can run this code directly in the Jenkins UI for a quick test without needing to push it to a Git repository first.
+
+Scroll down to the Pipeline section on the configuration page.
+
+Ensure the Definition dropdown is set to Pipeline script.
+
+Paste the following code directly into the Script box:
+
+Groovy
+pipeline {
+    agent any
+    stages {
+        stage('Fetch Secrets') {
+            steps {
+                script {
+                    // Jenkins uses the EC2 Instance Profile to authenticate implicitly
+                    def secretJson = sh(script: "aws secretsmanager get-secret-value --secret-id prod/app/db_password --query SecretString --output text", returnStdout: true).trim()
+
+                    // Parse the JSON payload
+                    def secretProps = readJSON text: secretJson
+
+                    // Set as environment variables for the current build
+                    env.DB_USER = secretProps.username
+                    env.DB_PASS = secretProps.password
+
+                    echo "Successfully fetched secrets from AWS!"
+                }
+            }
+        }
+        stage('Deploy Application') {
+            steps {
+                // We echo the username to verify it worked. 
+                // NEVER echo the password in a real production pipeline.
+                sh "echo Connecting to database with User: ${env.DB_USER}"
+            }
+        }
+    }
+}
+Note: This script requires the Pipeline Utility Steps plugin in Jenkins to use the readJSON function. If it fails on that line, you can install the plugin via Manage Jenkins -> Manage Plugins.
+
+Step 4: Run and Verify
+Click Save at the bottom of the page.
+
+Click Build Now on the left menu.
+
+Once the build finishes, click on the build number (e.g., #1) and select Console Output.
+
+Success Criteria:
+In the logs, you should see:
+Successfully fetched secrets from AWS!
+Connecting to database with User: admin
+
+Cleanup (Important)
+Once you have verified the pipeline works and documented the results, don't forget to run:
+
+Bash
+terraform destroy -auto-approve
+
+
+
+
+Let's fix Scenario 03 right now by spinning up that Jenkins server automatically using Terraform.
+
+Phase 1.5: Prerequisite - Provisioning the Jenkins EC2 Server
+We will add an EC2 instance to your existing main.tf file. This code will automatically fetch the latest Amazon Linux AMI, create a Security Group for ports 22 and 8080, attach the IAM role we just created, and use a user_data script to install and start Jenkins on boot.
+
+Step 1: Append this code to your main.tf
+Terraform
+# --- ADD THIS TO YOUR EXISTING main.tf ---
+
+# 7. Data source to get the latest Amazon Linux 2023 AMI
+data "aws_ami" "amazon_linux_2023" {
+  most_recent = true
+  owners      = ["amazon"]
+  filter {
+    name   = "name"
+    values = ["al2023-ami-2023.*-x86_64"]
+  }
+}
+
+# 8. Security Group for Jenkins
+resource "aws_security_group" "jenkins_sg" {
+  name        = "jenkins_sg"
+  description = "Allow port 8080 for Jenkins UI and 22 for SSH"
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] # In a real setup, restrict this to your IP
+  }
+
+  ingress {
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# 9. The Jenkins EC2 Instance
+resource "aws_instance" "jenkins_server" {
+  ami                    = data.aws_ami.amazon_linux_2023.id
+  instance_type          = "t2.micro" # Free tier eligible
+
+  # Automatically attaching the Instance Profile we created earlier!
+  iam_instance_profile   = aws_iam_instance_profile.jenkins_profile.name 
+  vpc_security_group_ids = [aws_security_group.jenkins_sg.id]
+
+  # Install Java and Jenkins automatically on boot
+  user_data = <<-EOF
+              #!/bin/bash
+              sudo dnf update -y
+              sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
+              sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+              sudo dnf upgrade -y
+              sudo dnf install java-17-amazon-corretto -y
+              sudo dnf install jenkins -y
+              sudo systemctl enable jenkins
+              sudo systemctl start jenkins
+              EOF
+
+  tags = {
+    Name = "Jenkins-Server-Scenario-03"
+  }
+}
+
+# 10. Output the Jenkins URL so you can easily access it
+output "jenkins_url" {
+  value       = "http://${aws_instance.jenkins_server.public_dns}:8080"
+  description = "Access the Jenkins UI here (Wait 2-3 minutes for installation)"
+}
+Step 2: Apply the Update
+Run the following commands in your terminal:
+
+Bash
+terraform fmt
+terraform apply -auto-approve
+Step 3: Initial Jenkins Setup
+Once Terraform finishes, it will print the jenkins_url output.
+
+Wait about 2 to 3 minutes for the user_data script to finish installing Jenkins in the background.
+
+Open the URL in your browser.
+
+You will see an "Unlock Jenkins" screen. To get the initial admin password, connect to the EC2 instance via AWS Systems Manager (Session Manager) in the console, or SSH into it, and run:
+
+Bash
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+Paste that password into the UI, click "Install suggested plugins", and create your quick admin user.
+
+Once you are at the main Jenkins dashboard, you are fully ready to execute Phase 2 (creating the Pipeline Job with the Jenkinsfile I provided earlier). The IAM Role is already securely attached to the server via Terraform!
+
+
+Ah, that error pops up because AWS has been phasing out t2.micro for the Free Tier in certain availability zones and newer accounts, replacing it with t3.micro.
+
+Let's quickly fix that in your main.tf file.
+
+The Fix
+Find the aws_instance block in your main.tf (around line 111 based on your error) and change the instance_type from "t2.micro" to "t3.micro".
+
+Terraform
+# 9. The Jenkins EC2 Instance
+resource "aws_instance" "jenkins_server" {
+  ami                    = data.aws_ami.amazon_linux_2023.id
+
+  # --- UPDATE THIS LINE ---
+  instance_type          = "t3.micro" 
+
+  iam_instance_profile   = aws_iam_instance_profile.jenkins_profile.name 
+  vpc_security_group_ids = [aws_security_group.jenkins_sg.id]
+
+  # Install Java and Jenkins automatically on boot
+  user_data = <<-EOF
+              #!/bin/bash
+              sudo dnf update -y
+              sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
+              sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+              sudo dnf upgrade -y
+              sudo dnf install java-17-amazon-corretto -y
+              sudo dnf install jenkins -y
+              sudo systemctl enable jenkins
+              sudo systemctl start jenkins
+              EOF
+
+  tags = {
+    Name = "Jenkins-Server-Scenario-03"
+  }
+}
+Save the file and run your apply command again:
+
+Bash
+terraform apply -auto-approve
+
+
+
+
+3. How to use it in your terminal
+You can run this right now on your MacBook Air to see what else you could have used for Scenario 03:
+
+aws ec2 describe-instance-types --filters Name=free-tier-eligible,Values=true --query "InstanceTypes[*].InstanceType" --region us-east-1
+
+The Output will look like this:
+
+JSON
+[
+    "t2.micro",
+    "t3.micro"
+]
+(Note: If you only see t3.micro, it means your account/region combination has moved away from the older t2 family for the Free Tier.)
+
+Next Steps for Scenario 03
+Now that your Jenkins server is live at http://ec2-54-235-50-227.compute-1.amazonaws.com:8080:
+
+Unlock Jenkins: Use sudo cat /var/lib/jenkins/secrets/initialAdminPassword on the server to get your password.
+
+Install Plugins: Choose "Install Suggested Plugins."
+
+Create the Job: Follow the "Phase 2" steps I provided earlier to create the pipeline that fetches the secret.
+
+
+
+admin password, because you're running the command locally on your laptop.
+
+The file /var/lib/jenkins/secrets/initialAdminPassword only exists inside the EC2 instance we just built, not on your Mac. You need to "log in" to the server first.
+
+Since we didn't specify an SSH key (.pem file) in our Terraform code, the easiest way to get in is through the AWS Console.
+
+How to get the password from the EC2 instance:
+Go to the AWS Console: Navigate to EC2 > Instances.
+
+Select the Instance: Check the box next to Jenkins-Server-Scenario-03.
+
+Click "Connect": It's the button at the top right.
+
+Choose "EC2 Instance Connect":
+
+Keep the user as ec2-user.
+
+Click the orange Connect button at the bottom.
+
+A new browser tab will open with a black terminal window.
+
+Run the command in that browser terminal:
+
+Bash
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+Copy the long string of letters/numbers: That is your Jenkins unlock code.
+
+
+Next Steps:
+Paste that code into your Jenkins browser window (http://ec2-54-235-50-227.compute-1.amazonaws.com:8080).
+
+Select Install Suggested Plugins.
+
+Once it's done, you're ready to create the pipeline we discussed in Phase 2!
+
+
+To access EC2 Instance Connect and find that password, follow these steps in your browser:Step-by-Step NavigationOpen the EC2 Console: Log in to your AWS account and go to the EC2 Dashboard.Select your Instance: Click on Instances (running) on the left or in the main dashboard.Check the Box: Find the instance named Jenkins-Server-Scenario-03 and click the checkbox next to it.Find the "Connect" Button: Look at the top-right corner of the page (near the "Instance state" and "Actions" buttons). You will see a button labeled Connect. Click it.In the Connection ScreenSelect the Tab: You will see four tabs at the top. Ensure EC2 Instance Connect is selected.Username: As you mentioned, keep the user as ec2-user.Launch: Click the orange Connect button at the bottom right.Inside the TerminalA new browser tab will open with a black command-line interface. Once it loads, paste this command to get your Jenkins unlock code:Bashsudo cat /var/lib/jenkins/secrets/initialAdminPassword
+Why we are doing this (Context from your Roadmap)According to Scenario 03: CI/CD Pipeline Security in your study guide:  We use IAM Roles for EC2 so the server can fetch secrets at runtime without hardcoded keys.  Accessing the server this way ensures you can set up the initial security configuration (like finding the admin password) without ever storing long-term credentials on your local machine.  
+
+
+Step 1: Check the Installation Progress
+The best way to see if the installation script finished is to check the cloud-init logs. This log records everything that happened during the user_data execution.
+
+Run this command in your EC2 terminal:
+
+Bash
+tail -n 50 /var/log/cloud-init-output.log
+If you see "Finished at [Timestamp]": The installation is done.
+
+If you see errors regarding "dnf" or "rpm": The installation failed (likely due to a repository issue).
+
+
+Step 2: Check the Jenkins Service Status
+If the logs say it's finished but the file is still missing, check if the Jenkins service actually started:
+
+Bash
+sudo systemctl status jenkins
+If it says active (running): The file should exist.
+
+If it says inactive or failed: Try starting it manually:
+
+Bash
+sudo systemctl start jenkins
+Step 3: Verify the File Location
+Sometimes, if the service just started, it takes a few seconds to generate the secret folder. Check if the directory even exists yet:
+
+Bash
+ls -ld /var/lib/jenkins/secrets
+If the directory exists, try the cat command again:
+
+Bash
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+
+
+**********************
+Why this is a "Lessons Learned" moment for Scenario 03
+In a real-world DevOps environment or an interview, this is a perfect example of User Data Latency.
+
+Interview Tip: If asked how to ensure a service is ready before a CI/CD pipeline starts, you can mention using a "Wait Condition" or a "Health Check" in Terraform/CloudFormation to ensure the software is fully initialized before reporting the stack as "Complete."
+*********************
+
+
+This is a common hurdle in Scenario 03 (and a great "troubleshooting" lesson for the repo). It usually happens because the system needs a daemon reload or a small tweak to the Java configuration on Amazon Linux 2023.
+
+Since you are already in the terminal, let's fix this manually so we can move forward.
+
+Step 1: Identify the Error
+Run this command to see why it failed:
+
+Bash
+sudo systemctl status jenkins
+If it says something about "Java" or "Dependency," we need to make sure the system knows where Java 17 is.
+
+Step 2: The Fix
+Run these three commands in order. They will reload the system managers, ensure Java is correctly linked, and force the service to start:
+
+Bash
+# 1. Reload the systemd manager configuration
+sudo systemctl daemon-reload
+
+# 2. Start Jenkins manually
+sudo systemctl start jenkins
+
+# 3. Check the status again
+sudo systemctl status jenkins
+Step 3: Verification
+Once you see active (running) in green text, run the command to get your password again:
+
+Bash
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+
+
+*****************************
+Why this happened (Troubleshooting & Lessons Learned)
+When using user_data, the script executes as the root user very early in the boot cycle. Sometimes, dnf finishes the installation, but the systemd service manager hasn't updated its internal cache of which services are available or where their dependencies (like Java) are located.
+
+Interview Tip: If an interviewer asks how to debug a failed user_data script, you can explain that you check /var/log/cloud-init-output.log first (which you just did), and then use journalctl -xeu <service> to find the specific failure reason.
+
+If the sudo systemctl start jenkins command still gives an error, please run:
+journalctl -xeu jenkins
+...and paste the last 10 lines here. I'll tell you exactly which configuration line needs a fix.
+
+If it works, proceed to your Jenkins URL and let's get that pipeline running!
+***********************************
+
+
+Step 2: Improved User Data (The "Jenkins Fix")
+To prevent the "service failed" error we saw earlier, let's make the user_data in your main.tf more robust for Amazon Linux 2023. Update the aws_instance block in your code to look like this before you run the apply command:
+
+Terraform
+  user_data = <<-EOF
+              #!/bin/bash
+              # Update and install dependencies
+              sudo dnf update -y
+              sudo dnf install wget fontconfig java-17-amazon-corretto -y
+
+              # Add Jenkins Repository
+              sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
+              sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+
+              # Install Jenkins
+              sudo dnf install jenkins -y
+
+              # Force systemd to recognize the new service and start it
+              sudo systemctl daemon-reload
+              sudo systemctl enable jenkins
+              sudo systemctl start jenkins
+              EOF
+Step 3: Verification (Prerequisites Check)
+Once terraform apply finishes and gives you a new jenkins_url:
+
+Wait 3 minutes: Give the script time to finish the installation.
+
+Connect to EC2 via Browser: (EC2 Dashboard -> Connect -> EC2 Instance Connect).
+
+Get the Password:
+
+Bash
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+Open the URL: Enter the password in your browser to unlock Jenkins.
+
+
+****************************************
+Lessons Learned for your Documentation
+When you write the "Troubleshooting" section for Scenario 03 in your Git repo, you can include this:
+
+Issue: Manual termination of resources leads to Terraform State Drift.
+
+Resolution: Use terraform apply to automatically detect missing resources and re-provision them to match the desired state.
+
+Issue: Jenkins service fails to start on initial boot in Amazon Linux 2023.
+
+Resolution: Ensure systemctl daemon-reload is included in the automation script to refresh the service manager after the package installation.
+**************************************
+
+The "Access denied" error is simply because you need to use sudo for system commands. The "No such file" error means Jenkins hasn't finished its setup yet.
+
+Let's fix this right now with these exact steps in your terminal:
+
+Step 1: Use sudo for the reload
+Run this to tell the system to refresh its service list:
+
+Bash
+sudo systemctl daemon-reload
+Step 2: Check the actual installation log
+If the password file is still missing, it’s likely because the installation is still running or hit a snag. Run this to see exactly what is happening in the background:
+
+Bash
+sudo tail -n 50 /var/log/cloud-init-output.log
+Wait until you see "Cloud-init... finished" at the bottom of these logs. If you see errors about "Package not found," the installation failed.
+
+Step 3: Check if Jenkins is even running
+Run this command to see the status:
+
+Bash
+sudo systemctl status jenkins
+If it says Active: active (running): The file will be there.
+
+If it says Active: inactive: Start it with sudo systemctl start jenkins.
+
+If it says not-found: The installation script didn't finish.
+
+Step 4: Get the password (once active)
+Once Step 3 shows it is running, try the cat command again:
+
+Bash
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+
+************************************
+Why this is happening (Troubleshooting Lesson for your Repo)
+In Scenario 03, you are automating infrastructure. A common "real-world" issue is Race Conditions.
+
+The Problem: You (the user) are logging in and asking for the password before the automation script (the user_data) has finished downloading and installing the software.
+
+The Fix: In production, we use "wait conditions" or "health checks" to ensure the service is ready before allowing access.
+
+If the status jenkins command says "not-found", stay in the terminal and let me know—we may need to run the installation commands manually one-by-one to see exactly where it's getting stuck.
+*************************************
+
+
+Let’s find the exact root cause. Follow these steps one by one:
+
+Step 1: Check the detailed error log
+Run this command to see the specific reason why the process is exiting:
+
+Bash
+sudo journalctl -xeu jenkins.service
+Look for lines containing "Error" or "Exception". Specifically, check if it says java.lang.UnsupportedClassVersionError or fontconfig error.
+
+Step 2: Verify the Java version
+Jenkins requires Java 11 or 17. Run this to check what is currently installed:
+
+Bash
+java -version
+If it says "command not found" or shows an older version (like Java 8), that is the issue.
+
+Step 3: The Manual Fix (Common for AL2023)
+If the logs mentioned a missing dependency or if Java is misconfigured, run these commands to ensure everything is in place:
+
+Bash
+# 1. Install fontconfig (a required dependency for Jenkins UI)
+sudo dnf install fontconfig java-17-amazon-corretto -y
+
+# 2. Check where Java is installed
+which java
+
+# 3. Try to start the service again
+sudo systemctl daemon-reload
+sudo systemctl start jenkins
+Step 4: Alternative (Direct Execution Test)
+If the service still won't start, we can try running the Jenkins WAR file directly to see the error on your screen in real-time. This bypasses systemd for a moment to debug:
+
+Bash
+sudo /usr/bin/java -Djava.awt.headless=true -jar /usr/share/java/jenkins.war
+If it starts scrolling with text: Wait until it says "Jenkins is fully up and running." (Then press Ctrl+C to stop it and we will fix the service).
+
+If it crashes immediately: Paste the last few lines of the error message here.
+
+************************************
+Why this is helpful for your "Scenario 03" Documentation
+In your repository, you should document this under the "Troubleshooting & Lessons Learned" section:
+
+Issue: jenkins.service fails with exit-code 1 on Amazon Linux 2023.
+
+Root Cause: Missing fontconfig dependency or incorrect Java environment variables during automated setup.
+
+Resolution: Manually installed java-17-amazon-corretto and fontconfig, then performed a systemctl daemon-reload.
+**********************************
+
+
+Your Java version is perfect (OpenJDK 17). The fact that the service is still failing with an "exit-code" almost always points to a missing graphics dependency called fontconfig, which Jenkins requires even in headless mode to render certain UI elements.
+
+Let's fix this manually right now so you can move forward. Run these commands in your EC2 terminal:
+
+Step 1: Install the missing dependency
+Amazon Linux 2023 is a very "slim" OS and often doesn't include this by default.
+
+Bash
+sudo dnf install fontconfig -y
+Step 2: Reset the Failure Counter
+Because Jenkins failed too many times, systemd has put it in a "cooldown" mode. We need to clear that.
+
+Bash
+sudo systemctl reset-failed jenkins
+Step 3: Start Jenkins
+Bash
+sudo systemctl start jenkins
+Step 4: Check Status and Get Password
+Bash
+sudo systemctl status jenkins
+If it shows active (running) in green, go ahead and grab your password:
+
+Bash
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+If it still fails... (The "Debugger" Step)
+If the service still won't start, we need to see the actual error message that Jenkins is throwing. Run this command to start Jenkins manually in your terminal:
+
+Bash
+sudo -u jenkins /usr/bin/java -Djava.awt.headless=true -jar /usr/share/java/jenkins.war
+If it works: You will see a long wall of text, and eventually, "Jenkins is fully up and running."
+
+If it crashes: It will print the exact error (e.g., "Permission Denied" or "Port 8080 already in use"). Paste that error here.
+
+
+************************************
+Why this matters for your Repo Documentation
+Under Phase 2: Troubleshooting & Lessons Learned for Scenario 03, you should add:
+
+Dependency Management: Jenkins on Amazon Linux 2023 requires fontconfig to start, even if no GUI is used.
+
+Systemd Rate Limiting: When a service crashes repeatedly, use systemctl reset-failed to allow the service to attempt starting again after fixing the root cause.
+**********************************
+
+That error message is the "smoking gun." The latest version of Jenkins you installed requires Java 21, but the instance currently has Java 17.
+
+This is a great "real-world" troubleshooting scenario for your repository: Handling Version Mismatches in Automated Deployments.
+
+Here is the step-by-step fix to get the server running immediately, followed by the documentation for your Git repo.
+
+Phase 1: The Immediate Fix (In your Terminal)
+Run these commands in your EC2 Instance Connect window:
+
+1. Install Java 21
+
+Bash
+sudo dnf install java-21-amazon-corretto -y
+2. Verify the installation
+
+Bash
+java -version
+(It should now show OpenJDK 21)
+
+3. Reload and Start Jenkins
+
+Bash
+sudo systemctl daemon-reload
+sudo systemctl reset-failed jenkins
+sudo systemctl start jenkins
+4. Check Status and Get Password
+
+Bash
+sudo systemctl status jenkins
+Once it shows active (running), run:
+
+Bash
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+Phase 2: Updating your Terraform Code
+To prevent this from happening again if you destroy and rebuild, update the user_data in your main.tf to use Java 21:
+
+Terraform
+  user_data = <<-EOF
+              #!/bin/bash
+              sudo dnf update -y
+              # Install Java 21 and fontconfig
+              sudo dnf install fontconfig java-21-amazon-corretto -y
+
+              # Add Jenkins Repository
+              sudo wget -O /etc/yum.repos.d/jenkins.repo https://pkg.jenkins.io/redhat-stable/jenkins.repo
+              sudo rpm --import https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+
+              # Install Jenkins
+              sudo dnf install jenkins -y
+
+              sudo systemctl daemon-reload
+              sudo systemctl enable jenkins
+              sudo systemctl start jenkins
+              EOF
+
+
+
+
+
+
+Great! You have the unlock code. Now we can finally see the Security implementation in action.
+
+Follow these final steps to complete Scenario 03 and see how the Jenkins server uses its IAM Role to talk to AWS Secrets Manager.
+
+Step 1: Unlock and Setup Jenkins
+Go to your browser: http://ec2-54-235-50-227.compute-1.amazonaws.com:8080
+
+Paste the code: aed50460378647ec8551f0879b54d511
+
+Click Install suggested plugins and wait for it to finish.
+
+Create your First Admin User (you can use admin / admin123 for this lab).
+
+Click Save and Finish until you reach the main Jenkins Dashboard.
+
+Step 2: Create the Security Test Pipeline
+This is where we test the "Security" part—fetching a secret without using any login keys.
+
+On the left, click New Item.
+
+Name it: Scenario-03-Security-Check.
+
+Select Pipeline and click OK.
+
+Scroll down to the Pipeline Script box and paste this exact code:
+
+Groovy
+pipeline {
+    agent any
+    stages {
+        stage('Security: Fetch DB Secret') {
+            steps {
+                script {
+                    echo "Checking AWS for secrets using IAM Role..."
+
+                    // This command works ONLY because the EC2 instance has the 'jenkins_instance_profile' attached
+                    def secretJson = sh(script: "aws secretsmanager get-secret-value --secret-id prod/app/db_password --region us-east-1 --query SecretString --output text", returnStdout: true).trim()
+
+                    echo "Successfully connected to AWS Secrets Manager!"
+                    echo "The raw secret was retrieved securely into memory."
+
+                    // We print the string 'hidden' to demonstrate masking
+                    echo "Retrieved Payload: ${secretJson}"
+                }
+            }
+        }
+    }
+}
+Step 3: Run and Verify
+Click Save.
+
+Click Build Now.
+
+Wait for the green checkmark, then click on the Build Number (#1) -> Console Output.
+
+What to look for in the logs:
+
+You should see: Successfully connected to AWS Secrets Manager!
+
+You should see the JSON containing SuperSecretPassword123!.
+
+Final Documentation: What did we learn about "Security"?
+This scenario is the "Gold Standard" for DevOps security. When an interviewer asks how you secure a CI/CD pipeline, you now have a real-world answer:
+
+Eliminated "Static Credentials": We didn't create an IAM User with a password. We used an IAM Role. If the Jenkins server is deleted, the permission disappears with it. No keys to leak on GitHub!
+
+Centralized Vault: Instead of keeping passwords in Jenkins "Credentials," we kept them in AWS Secrets Manager. This allows the Security Team to manage passwords in one place while the DevOps Team just "consumes" them.
+
+Scope Limitation: Our IAM policy didn't say "allow everything." It said "only allow reading this ONE secret." This is called Least Privilege.
+
+
+
+
+"Infrastructure Connectivity Troubleshooting."
+
+Follow these steps in order:
+
+Step 1: Check the Security Group in AWS
+Even if the Terraform code looks right, let's verify it in the Console:
+
+Go to the EC2 Dashboard and select your running instance.
+
+Click the Security tab in the bottom panel.
+
+Click on the Security Group ID (e.g., sg-xxxxxxxx).
+
+Verify that there is an Inbound Rule for:
+
+Type: Custom TCP
+
+Port Range: 8080
+
+Source: 0.0.0.0/0 (or your specific IP)
+
+Step 2: Verify Jenkins is actually listening
+Log back into the terminal via EC2 Instance Connect and run this command:
+
+Bash
+sudo netstat -tunlp | grep 8080
+If you see a line ending in LISTEN: Jenkins is running and waiting for connections.
+
+If you see nothing: The service has stopped again. Try:
+
+Bash
+sudo systemctl restart jenkins
+Step 3: Test Local Connectivity (Mac Terminal)
+Open a new terminal tab on your MacBook (not the EC2 one) and try to "ping" the port:
+
+Bash
+nc -zv 54.235.50.227 8080
+If it says "Succeeded!": The server is fine, but your browser might be trying to use https instead of http. Make sure you type http:// manually in the address bar.
+
+If it says "Timed out" or "Refused": The traffic is being blocked by a firewall (either in AWS or your current local network).
+
+Step 4: Common "Work Network" Issue
+If you are currently on a corporate VPN or a restricted network, port 8080 is often blocked by company firewalls.
+
+Quick Fix: Try accessing the URL from your phone (using mobile data, not Wi-Fi) to see if it loads. If it works on your phone, the issue is your local network.
+
+Step 5: Check the IP again
+If you terminated the instance and ran terraform apply again, the Public IP will have changed.
+
+Go to the EC2 Console.
+
+Copy the Public IPv4 address from the new instance.
+
+Try http://<NEW_IP>:8080
+
+
+
+
+The "command not found" error occurs because Amazon Linux 2023 (AL2023) has moved from iptables to nftables by default. However, for your DevOps scenario, you can easily install the iptables compatibility layer to make your commands work.
+
+Here is the Perfect Solution to get your Jenkins instance accessible on port 80.
+
+Step 1: Install the missing tool
+Run this command in your EC2 terminal to install the iptables package:
+
+Bash
+sudo dnf install iptables-services -y
+Step 2: Enable IP Forwarding
+For the redirection to work at the kernel level, you must ensure IPv4 forwarding is enabled:
+
+Bash
+echo 1 | sudo tee /proc/sys/net/ipv4/ip_forward
+Step 3: Redirect Port 80 to 8080
+Now that the command is installed, run the redirection. This tells the Linux kernel: "If anyone hits port 80, send them to 8080 internally."
+
+Bash
+sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8080
+Step 4: Save the Rules (Persistence)
+By default, iptables rules disappear after a reboot. Save them so they stay active:
+
+Bash
+sudo service iptables save
+sudo systemctl enable iptables
+sudo systemctl start iptables
+Step 5: The "AWS Barrier" (Critical)
+Your server is now ready to receive traffic on port 80, but AWS will still block it unless the Security Group is updated.
+
+Go to the AWS Console > EC2 > Instances.
+
+Select your instance and click the Security tab.
+
+Click the Security Group ID.
+
+Click Edit inbound rules and add this rule:
+
+Type: HTTP
+
+Port Range: 80
+
+Source: 0.0.0.0/0
+
+Click Save rules.
+
+Step 6: Final Test
+Now, open a new browser tab and type only the IP address (without the 8080):
+http://54.235.50.227
+
+Why this is the "Perfect Solution" for your Interview Prep:
+In a Technical Specialist interview, if you're asked about "Port Redirection," providing this solution demonstrates:
+
+OS Knowledge: You know AL2023 shifted to nftables but can manage legacy iptables dependencies.
+
+Kernel Understanding: You know that NAT (Network Address Translation) requires ip_forward to be enabled.
+
+Cloud Infrastructure: You realize that OS-level changes mean nothing if the Cloud Firewall (Security Group) isn't synchronized.
+
+
+
+Follow these 3 specific checks in the AWS Console. One of these is the "Wall" blocking your traffic.
+
+Check 1: The "Public IP" Verification (Most Common)
+When you terminated the instance manually and ran terraform apply again, your Public IP address changed.
+
+Go to the AWS Console > EC2 > Instances.
+
+Look at the instance Jenkins-Server-Scenario-03.
+
+Check the "Public IPv4 address" field. Is it still exactly 54.235.50.227?
+
+If it has changed (e.g., to 3.x.x.x), you must use the new IP in your browser.
+
+Check 2: The Security Group "Inbound Rule" (Manual Verification)
+Even if the Terraform code looks correct, let's look at what is actually active in the AWS Console.
+
+In the EC2 instance details, click the Security tab.
+
+Click on the Security Group ID (e.g., sg-0abc...).
+
+Look at Inbound rules. Do you see a rule for Port 8080 or Port 80?
+
+Crucial: The Source column MUST say 0.0.0.0/0. If it says something else, the internet cannot reach it.
+
+Check 3: The Network ACL (NACL) - The "Silent Killer"
+While Security Groups are "Stateful" (they remember you), Network ACLs are "Stateless." If someone (or a default policy) modified the VPC settings, it could be blocking port 8080 at the subnet level.
+
+In the EC2 instance details, click the Networking tab.
+
+Click on the Subnet ID.
+
+Click the Network ACL tab.
+
+Check Inbound Rules: There must be an "Allow" rule for port 8080 (or All Traffic).
+
+Check Outbound Rules: This is usually the problem. There must be an "Allow" rule for Ephemeral Ports (1024-65535) to let the response traffic get back out to your browser.
+
+The "Direct Diagnostic" Command
+Run this command inside your EC2 terminal. It will tell us if the server is "Publicly Aware":
+
+Bash
+# This asks AWS what the server's own Public IP is
+curl http://checkip.amazonaws.com
+Does the IP it prints match the one you are typing in your browser? If they don't match, you are trying to hit the wrong server.
+
+Why this is the "Technical Specialist" approach:
+In an interview, if you are asked why a site isn't loading, you don't just "try things." You explain the Traffic Flow:
+
+Browser -> Internet Gateway -> Network ACL -> Security Group -> OS Firewall -> Jenkins.
+
+Which error does your browser show?
+
+"Timed Out": The traffic is being dropped (Security Group or NACL).
+
+"Connection Refused": The traffic reached the server, but the service said no (Service issue).
+
+
+
+
+
+There it is! This explains everything. Your previous attempts were failing because the instance was likely recreated and given a new Public IP address. The old IP (54.235.50.227) no longer exists, which is why it was "Timed Out."
+
+Try this new URL immediately:
+http://13.223.77.175:8080
+
+If it still doesn't load, follow this "Final Check" list:
+1. The "Fresh" Password
+Every time you create a new instance, Jenkins generates a new unique password. The old one will not work. Run this in your new EC2 terminal:
+
+Bash
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+Copy this new code—you will need it the moment the page loads.
+
+2. Security Group Check (Manual)
+Since this is a new IP, ensure the Security Group assigned to this specific instance allows port 8080:
+
+Go to the AWS Console -> EC2 -> Instances.
+
+Select the instance with IP 13.223.77.175.
+
+Click Security > Security Group ID.
+
+Ensure Inbound Rules has: Port 8080, TCP, Source 0.0.0.0/0.
+
+3. Start Jenkins (If it's a fresh install)
+If you just launched this, the service might not have started yet. Run:
+
+Bash
+sudo systemctl daemon-reload
+sudo systemctl enable jenkins
+sudo systemctl start jenkins
+Why this was a great "Technical Specialist" lesson:
+In a real-world production environment, we use Elastic IPs or Load Balancers.
+
+The Problem: Standard Public IPs in AWS are "dynamic"—they change every time you stop/start or terminate an instance.
+
+The Solution: In Scenario 03, if we were doing this for a client, we would attach an Elastic IP so the URL never changes, even if the server is replaced.
+
